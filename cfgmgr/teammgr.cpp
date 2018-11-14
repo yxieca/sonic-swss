@@ -430,6 +430,11 @@ task_process_status TeamMgr::addLagMember(const string &lag, const string &membe
 {
     SWSS_LOG_ENTER();
 
+    if (isPortEnslaved(member))
+    {
+        return task_success;
+    }
+
     stringstream cmd;
     string res;
 
