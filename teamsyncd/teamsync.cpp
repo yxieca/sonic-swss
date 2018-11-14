@@ -72,6 +72,7 @@ void TeamSync::onMsg(int nlmsg_type, struct nl_object *obj)
 void TeamSync::addLag(const string &lagName, int ifindex, bool admin_state,
                       bool oper_state)
 {
+    SWSS_LOG_ERROR("BBB addLag: name=%s ifindex=%d admin=%s oper=%s", lagName.c_str(), ifindex, admin_state ? "up" : "down", oper_state ? "up" : "down");
     /* Set the LAG */
     std::vector<FieldValueTuple> fvVector;
     FieldValueTuple a("admin_status", admin_state ? "up" : "down");
@@ -100,6 +101,7 @@ void TeamSync::addLag(const string &lagName, int ifindex, bool admin_state,
 
 void TeamSync::removeLag(const string &lagName)
 {
+    SWSS_LOG_ERROR("BBB removeLag: name=%s", lagName.c_str());
     /* Delete all members */
     auto selectable = m_teamSelectables[lagName];
     for (auto it : selectable->m_lagMembers)
@@ -196,6 +198,7 @@ int TeamSync::TeamPortSync::onChange()
         /* Skip the member that is removed from the LAG */
         if (team_is_port_removed(port))
         {
+            SWSS_LOG_ERROR("BBB lag members: %s port removed", ifname);
             continue;
         }
 
@@ -213,6 +216,7 @@ int TeamSync::TeamPortSync::onChange()
             FieldValueTuple l("status", it.second ? "enabled" : "disabled");
             v.push_back(l);
             m_lagMemberTable->set(key, v);
+            SWSS_LOG_ERROR("BBB set: %s -> %s", key.c_str(), it.second ? "enabled" : "disabled");
         }
     }
 
@@ -222,6 +226,7 @@ int TeamSync::TeamPortSync::onChange()
         {
             string key = m_lagName + ":" + it.first;
             m_lagMemberTable->del(key);
+            SWSS_LOG_ERROR("BBB del: %s", key.c_str());
         }
     }
 
