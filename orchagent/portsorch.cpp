@@ -214,7 +214,7 @@ PortsOrch::PortsOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames)
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to get CPU port, rv:%d", status);
-        throw runtime_error("PortsOrch initialization failure");
+        throw "PortsOrch initialization failure";
     }
 
     m_cpuPort = Port("CPU", Port::CPU);
@@ -228,7 +228,7 @@ PortsOrch::PortsOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames)
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to get port number, rv:%d", status);
-        throw runtime_error("PortsOrch initialization failure");
+        throw "PortsOrch initialization failure";
     }
 
     m_portCount = attr.value.u32;
@@ -246,7 +246,7 @@ PortsOrch::PortsOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames)
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to get port list, rv:%d", status);
-        throw runtime_error("PortsOrch initialization failure");
+        throw "PortsOrch initialization failure";
     }
 
     /* Get port hardware lane info */
@@ -261,7 +261,7 @@ PortsOrch::PortsOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames)
         if (status != SAI_STATUS_SUCCESS)
         {
             SWSS_LOG_ERROR("Failed to get hardware lane list pid:%lx", port_list[i]);
-            throw runtime_error("PortsOrch initialization failure");
+            throw "PortsOrch initialization failure";
         }
 
         set<int> tmp_lane_set;
@@ -290,7 +290,7 @@ PortsOrch::PortsOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames)
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to get default 1Q bridge and/or default VLAN, rv:%d", status);
-        throw runtime_error("PortsOrch initialization failure");
+        throw "PortsOrch initialization failure";
     }
 
     m_default1QBridge = attrs[0].value.oid;
@@ -320,7 +320,7 @@ void PortsOrch::removeDefaultVlanMembers()
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to get VLAN member list in default VLAN, rv:%d", status);
-        throw runtime_error("PortsOrch initialization failure");
+        throw "PortsOrch initialization failure";
     }
 
     /* Remove VLAN members in default VLAN */
@@ -330,7 +330,7 @@ void PortsOrch::removeDefaultVlanMembers()
         if (status != SAI_STATUS_SUCCESS)
         {
             SWSS_LOG_ERROR("Failed to remove VLAN member, rv:%d", status);
-            throw runtime_error("PortsOrch initialization failure");
+            throw "PortsOrch initialization failure";
         }
     }
 
@@ -354,7 +354,7 @@ void PortsOrch::removeDefaultBridgePorts()
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to get bridge port list in default 1Q bridge, rv:%d", status);
-        throw runtime_error("PortsOrch initialization failure");
+        throw "PortsOrch initialization failure";
     }
 
     auto bridge_port_count = attr.value.objlist.count;
@@ -369,7 +369,7 @@ void PortsOrch::removeDefaultBridgePorts()
         if (status != SAI_STATUS_SUCCESS)
         {
             SWSS_LOG_ERROR("Failed to get bridge port type, rv:%d", status);
-            throw runtime_error("PortsOrch initialization failure");
+            throw "PortsOrch initialization failure";
         }
         if (attr.value.s32 == SAI_BRIDGE_PORT_TYPE_PORT)
         {
@@ -377,7 +377,7 @@ void PortsOrch::removeDefaultBridgePorts()
             if (status != SAI_STATUS_SUCCESS)
             {
                 SWSS_LOG_ERROR("Failed to remove bridge port, rv:%d", status);
-                throw runtime_error("PortsOrch initialization failure");
+                throw "PortsOrch initialization failure";
             }
         }
     }
@@ -1168,36 +1168,55 @@ bool PortsOrch::setPortAutoNeg(sai_object_id_t id, int an)
     return true;
 }
 
-bool PortsOrch::setHostIntfsOperStatus(const Port& port, bool isUp) const
+bool PortsOrch::setHostIntfsOperStatus(sai_object_id_t port_id, bool up)
 {
     SWSS_LOG_ENTER();
 
-    sai_attribute_t attr;
-    attr.id = SAI_HOSTIF_ATTR_OPER_STATUS;
-    attr.value.booldata = isUp;
-
-    sai_status_t status = sai_hostif_api->set_hostif_attribute(port.m_hif_id, &attr);
-    if (status != SAI_STATUS_SUCCESS)
+    for (auto it = m_portList.begin(); it != m_portList.end(); it++)
     {
-        SWSS_LOG_WARN("Failed to set operation status %s to host interface %s",
-                isUp ? "UP" : "DOWN", port.m_alias.c_str());
-        return false;
+        if (it->second.m_port_id != port_id)
+        {
+            continue;
+        }
+
+        sai_attribute_t attr;
+        attr.id = SAI_HOSTIF_ATTR_OPER_STATUS;
+        attr.value.booldata = up;
+
+        sai_status_t status = sai_hostif_api->set_hostif_attribute(it->second.m_hif_id, &attr);
+        if (status != SAI_STATUS_SUCCESS)
+        {
+            SWSS_LOG_WARN("Failed to set operation status %s to host interface %s",
+                          up ? "UP" : "DOWN", it->second.m_alias.c_str());
+            return false;
+        }
+        SWSS_LOG_NOTICE("Set operation status %s to host interface %s",
+                        up ? "UP" : "DOWN", it->second.m_alias.c_str());
+        if (gNeighOrch->ifChangeInformNextHop(it->second.m_alias, up) == false)
+        {
+            SWSS_LOG_WARN("Inform nexthop operation failed for interface %s",
+                          it->second.m_alias.c_str());
+        }
+        return true;
     }
-
-    SWSS_LOG_NOTICE("Set operation status %s to host interface %s",
-            isUp ? "UP" : "DOWN", port.m_alias.c_str());
-
-    return true;
+    return false;
 }
 
-void PortsOrch::updateDbPortOperStatus(const Port& port, sai_port_oper_status_t status) const
+void PortsOrch::updateDbPortOperStatus(sai_object_id_t id, sai_port_oper_status_t status)
 {
     SWSS_LOG_ENTER();
 
-    vector<FieldValueTuple> tuples;
-    FieldValueTuple tuple("oper_status", oper_status_strings.at(status));
-    tuples.push_back(tuple);
-    m_portTable->set(port.m_alias, tuples);
+    for (auto it = m_portList.begin(); it != m_portList.end(); it++)
+    {
+        if (it->second.m_port_id == id)
+        {
+            vector<FieldValueTuple> tuples;
+            FieldValueTuple tuple("oper_status", oper_status_strings.at(status));
+            tuples.push_back(tuple);
+            m_portTable->set(it->first, tuples);
+            it->second.m_oper_status = status;
+        }
+    }
 }
 
 bool PortsOrch::addPort(const set<int> &lane_set, uint32_t speed, int an, string fec_mode)
@@ -1462,7 +1481,6 @@ void PortsOrch::doPortTask(Consumer &consumer)
 
             it = consumer.m_toSync.erase(it);
             return;
-
         }
 
         if (op == SET_COMMAND)
@@ -2326,37 +2344,37 @@ void PortsOrch::initializePriorityGroups(Port &port)
     SWSS_LOG_INFO("Get priority groups for port %s", port.m_alias.c_str());
 }
 
-bool PortsOrch::initializePort(Port &port)
+bool PortsOrch::initializePort(Port &p)
 {
     SWSS_LOG_ENTER();
 
-    SWSS_LOG_NOTICE("Initializing port alias:%s pid:%lx", port.m_alias.c_str(), port.m_port_id);
+    SWSS_LOG_NOTICE("Initializing port alias:%s pid:%lx", p.m_alias.c_str(), p.m_port_id);
 
-    initializePriorityGroups(port);
-    initializeQueues(port);
+    initializePriorityGroups(p);
+    initializeQueues(p);
 
     /* Create host interface */
-    if (!addHostIntfs(port, port.m_alias, port.m_hif_id))
-    {
-        SWSS_LOG_ERROR("Failed to create host interface for port %s", port.m_alias.c_str());
-        return false;
-    }
+    addHostIntfs(p, p.m_alias, p.m_hif_id);
 
     /* Check warm start states */
     vector<FieldValueTuple> tuples;
-    bool exist = m_portTable->get(port.m_alias, tuples);
-    string operStatus;
+    bool exist = m_portTable->get(p.m_alias, tuples);
+    string adminStatus, operStatus;
     if (exist)
     {
         for (auto i : tuples)
         {
-            if (fvField(i) == "oper_status")
+            if (fvField(i) == "admin_status")
+            {
+                adminStatus = fvValue(i);
+            }
+            else if (fvField(i) == "oper_status")
             {
                 operStatus = fvValue(i);
             }
         }
     }
-    SWSS_LOG_DEBUG("initializePort %s with oper %s", port.m_alias.c_str(), operStatus.c_str());
+    SWSS_LOG_DEBUG("initializePort %s with admin %s and oper %s", p.m_alias.c_str(), adminStatus.c_str(), operStatus.c_str());
 
     /**
      * Create database port oper status as DOWN if attr missing
@@ -2364,26 +2382,31 @@ bool PortsOrch::initializePort(Port &port)
      */
     if (operStatus == "up")
     {
-        port.m_oper_status = SAI_PORT_OPER_STATUS_UP;
+        p.m_oper_status = SAI_PORT_OPER_STATUS_UP;
     }
     else if (operStatus.empty())
     {
-        port.m_oper_status = SAI_PORT_OPER_STATUS_DOWN;
+        p.m_oper_status = SAI_PORT_OPER_STATUS_DOWN;
         /* Fill oper_status in db with default value "down" */
-        m_portTable->hset(port.m_alias, "oper_status", "down");
+        m_portTable->hset(p.m_alias, "oper_status", "down");
     }
     else
     {
-        port.m_oper_status = SAI_PORT_OPER_STATUS_DOWN;
+        p.m_oper_status = SAI_PORT_OPER_STATUS_DOWN;
     }
 
     /*
      * always initialize Port SAI_HOSTIF_ATTR_OPER_STATUS based on oper_status value in appDB.
      */
-    if (!setHostIntfsOperStatus(port, port.m_oper_status))
+    sai_attribute_t attr;
+    attr.id = SAI_HOSTIF_ATTR_OPER_STATUS;
+    attr.value.booldata = (p.m_oper_status == SAI_PORT_OPER_STATUS_UP);
+
+    sai_status_t status = sai_hostif_api->set_hostif_attribute(p.m_hif_id, &attr);
+    if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_WARN("Failed to set operation status %s to host interface %s",
-                      operStatus.c_str(), port.m_alias.c_str());
+                      operStatus.c_str(), p.m_alias.c_str());
         return false;
     }
 
@@ -3077,17 +3100,12 @@ void PortsOrch::doTask(NotificationConsumer &consumer)
             SWSS_LOG_NOTICE("Get port state change notification id:%lx status:%d", id, status);
 
             Port port;
-
             if (!getPort(id, port))
             {
                 SWSS_LOG_ERROR("Failed to get port object for port id 0x%lx", id);
                 continue;
             }
-
             updatePortOperStatus(port, status);
-
-            /* update m_portList */
-            m_portList[port.m_alias] = port;
         }
 
         sai_deserialize_free_port_oper_status_ntf(count, portoperstatus);
@@ -3099,23 +3117,13 @@ void PortsOrch::updatePortOperStatus(Port &port, sai_port_oper_status_t status)
     SWSS_LOG_NOTICE("Port %s oper state set from %s to %s",
             port.m_alias.c_str(), oper_status_strings.at(port.m_oper_status).c_str(),
             oper_status_strings.at(status).c_str());
-    if (status == port.m_oper_status)
+    if (status != port.m_oper_status)
     {
-        return ;
-    }
-
-    updateDbPortOperStatus(port, status);
-    port.m_oper_status = status;
-
-    bool isUp = status == SAI_PORT_OPER_STATUS_UP;
-    if (!setHostIntfsOperStatus(port, isUp))
-    {
-        SWSS_LOG_ERROR("Failed to set host interface %s operational status %s", port.m_alias.c_str(),
-                isUp ? "up" : "down");
-    }
-    if (!gNeighOrch->ifChangeInformNextHop(port.m_alias, isUp))
-    {
-        SWSS_LOG_WARN("Inform nexthop operation failed for interface %s", port.m_alias.c_str());
+        this->updateDbPortOperStatus(port.m_port_id, status);
+        if (status == SAI_PORT_OPER_STATUS_UP || port.m_oper_status == SAI_PORT_OPER_STATUS_UP)
+        {
+            this->setHostIntfsOperStatus(port.m_port_id, status == SAI_PORT_OPER_STATUS_UP);
+        }
     }
 }
 
@@ -3136,44 +3144,21 @@ void PortsOrch::refreshPortStatus()
 
     for (auto &it: m_portList)
     {
-        auto &port = it.second;
-        if (port.m_type != Port::PHY)
+        auto &p = it.second;
+        if (p.m_type == Port::PHY)
         {
-            continue;
-        }
+            sai_attribute_t attr;
+            attr.id = SAI_PORT_ATTR_OPER_STATUS;
 
-        sai_port_oper_status_t status;
-        if (!getPortOperStatus(port, status))
-        {
-            throw runtime_error("PortsOrch get port oper status failure");
+            sai_status_t ret = sai_port_api->get_port_attribute(p.m_port_id, 1, &attr);
+            if (ret != SAI_STATUS_SUCCESS)
+            {
+                SWSS_LOG_ERROR("Failed to get oper status for %s", p.m_alias.c_str());
+                throw "PortsOrch get port oper status failure";
+            }
+            sai_port_oper_status_t status = (sai_port_oper_status_t)attr.value.u32;
+            SWSS_LOG_INFO("%s oper status is %s", p.m_alias.c_str(), oper_status_strings.at(status).c_str());
+            updatePortOperStatus(p, status);
         }
-
-        SWSS_LOG_INFO("%s oper status is %s", port.m_alias.c_str(), oper_status_strings.at(status).c_str());
-        updatePortOperStatus(port, status);
     }
 }
-
-bool PortsOrch::getPortOperStatus(const Port& port, sai_port_oper_status_t& status) const
-{
-    SWSS_LOG_ENTER();
-
-    if (port.m_type != Port::PHY)
-    {
-        return false;
-    }
-
-    sai_attribute_t attr;
-    attr.id = SAI_PORT_ATTR_OPER_STATUS;
-
-    sai_status_t ret = sai_port_api->get_port_attribute(port.m_port_id, 1, &attr);
-    if (ret != SAI_STATUS_SUCCESS)
-    {
-        SWSS_LOG_ERROR("Failed to get oper_status for %s", port.m_alias.c_str());
-        return false;
-    }
-
-    status = static_cast<sai_port_oper_status_t>(attr.value.u32);
-
-    return true;
-}
-
